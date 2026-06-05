@@ -42,3 +42,15 @@ export interface RedisClusterOptions {
     connectTimeout?: number;
     natMap?: Record<string, { host: string; port: number }>;
 }
+
+export interface HealthCheckResult {
+    status: "healthy" | "degraded" | "unhealthy";
+    latencyMs: number;
+    circuitState: string;
+    connected: boolean;
+    timestamp: number;
+}
+
+export interface HealthCheckStrategy {
+    check(): Promise<HealthCheckResult>;
+}
