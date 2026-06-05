@@ -27,6 +27,10 @@
     "./logger.js": {
       "types": "./dist/logger.d.ts",
       "import": "./dist/logger.js"
+    },
+    "./health.js": {
+      "types": "./dist/health/health.d.ts",
+      "import": "./dist/health/health.js"
     }
   },
   "files": [
@@ -34,12 +38,13 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsup",
     "prepublishOnly": "pnpm build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:unit": "vitest run tests/circuitBreaker.test.ts",
-    "test:integration": "vitest run tests/connection.test.ts"
+    "test:integration": "vitest run tests/connection.test.ts",
+    "test:health": "vitest run tests/health.test.ts"
   },
   "keywords": [
     "redis",
@@ -65,11 +70,6 @@
       "onFail": "download"
     }
   },
-  "imports": {
-    "#connection/*": "./dist/connection/*",
-    "#circuit/*": "./dist/circuit/*",
-    "#helper/*": "./dist/helper/*"
-  },
   "dependencies": {
     "ioredis": "^5.11.1",
     "winston": "^3.19.0"
@@ -78,6 +78,7 @@
     "@testcontainers/redis": "^12.0.1",
     "@types/node": "^25.9.1",
     "testcontainers": "^12.0.1",
+    "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
   }
