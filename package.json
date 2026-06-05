@@ -1,18 +1,63 @@
 {
   "name": "redis-axon",
   "version": "1.0.0",
-  "description": "",
-  "types": "module",
-  "main": "index.js",
+  "description": "A resilient Redis client with circuit breaker, connection pooling, cluster support, and automatic reconnection with exponential backoff.",
+  "author": "Srajan Saxena",
+  "license": "ISC",
+  "type": "module",
+  "main": "./dist/connection/connection.js",
+  "types": "./dist/connection/connection.d.ts",
+  "exports": {
+    "./connection/connection.js": {
+      "types": "./dist/connection/connection.d.ts",
+      "import": "./dist/connection/connection.js"
+    },
+    "./connection/pool.js": {
+      "types": "./dist/connection/pool.d.ts",
+      "import": "./dist/connection/pool.js"
+    },
+    "./connection/cluster.js": {
+      "types": "./dist/connection/cluster.d.ts",
+      "import": "./dist/connection/cluster.js"
+    },
+    "./circuit/circuitBreaker.js": {
+      "types": "./dist/circuit/circuitBreaker.d.ts",
+      "import": "./dist/circuit/circuitBreaker.js"
+    },
+    "./logger.js": {
+      "types": "./dist/logger.d.ts",
+      "import": "./dist/logger.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "pnpm build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:unit": "vitest run tests/circuitBreaker.test.ts",
     "test:integration": "vitest run tests/connection.test.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "redis",
+    "ioredis",
+    "circuit-breaker",
+    "connection-pool",
+    "cluster",
+    "resilient",
+    "reconnection",
+    "backoff"
+  ],
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
@@ -20,11 +65,10 @@
       "onFail": "download"
     }
   },
-  "type": "module",
   "imports": {
-    "#connection/*": "./src/connection/*",
-    "#circuit/*": "./src/circuit/*",
-    "#helper/*": "./src/helper/*"
+    "#connection/*": "./dist/connection/*",
+    "#circuit/*": "./dist/circuit/*",
+    "#helper/*": "./dist/helper/*"
   },
   "dependencies": {
     "ioredis": "^5.11.1",
@@ -34,6 +78,7 @@
     "@testcontainers/redis": "^12.0.1",
     "@types/node": "^25.9.1",
     "testcontainers": "^12.0.1",
+    "typescript": "^5.9.3",
     "vitest": "^4.1.8"
   }
 }

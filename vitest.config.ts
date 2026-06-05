@@ -8,9 +8,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@connection": path.resolve(__dirname, "src/connection"),
-      "@circuit": path.resolve(__dirname, "src/circuit"),
-      "@helper": path.resolve(__dirname, "src/helper"),
+      "#connection": path.resolve(__dirname, "src/connection"),
+      "#circuit": path.resolve(__dirname, "src/circuit"),
+      "#helper": path.resolve(__dirname, "src/helper"),
     },
   },
 });

@@ -223,6 +223,9 @@ importers:
       testcontainers:
         specifier: ^12.0.1
         version: 12.0.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
       vitest:
         specifier: ^4.1.8
         version: 4.1.8(@types/node@25.9.1)(vite@8.0.16(@types/node@25.9.1)(yaml@2.9.0))
@@ -1184,6 +1187,11 @@ packages:
 
   tweetnacl@0.14.5:
     resolution: {integrity: sha512-KXXFFdAbFXY4geFIwoyNK+f5Z1b7swfXABfL7HXCmoIWMKU3dmS26672A4EeQtDzLKy7SXmfBu51JolvEKwtGA==}
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
 
   undici-types@5.26.5:
     resolution: {integrity: sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==}
@@ -2303,6 +2311,8 @@ snapshots:
     optional: true
 
   tweetnacl@0.14.5: {}
+
+  typescript@5.9.3: {}
 
   undici-types@5.26.5: {}
 

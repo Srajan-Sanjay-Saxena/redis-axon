@@ -9,6 +9,9 @@
     "verbatimModuleSyntax": true,
     "moduleResolution": "nodenext",
     "module": "NodeNext",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "paths": {

@@ -1,0 +1,9 @@
+src/
+tests/
+vitest.config.ts
+tsconfig.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+.gitignore
+.env
+.env.*
