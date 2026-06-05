@@ -6,20 +6,23 @@
     "allowJs": false,
     "moduleDetection": "force",
     "isolatedModules": true,
-    "verbatimModuleSyntax": true,
-    "moduleResolution": "nodenext",
-    "module": "NodeNext",
+    "verbatimModuleSyntax": false,
+    "moduleResolution": "bundler",
+    "module": "ESNext",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "paths": {
-      "#connection/*" : ["./src/connection/*"],
-      "#circuit/*" : ["./src/circuit/*"],
-      "#helper/*" : ["./src/helper/*"]
+      "@connection/*": ["./src/connection/*"],
+      "@circuit/*": ["./src/circuit/*"],
+      "@helper/*": ["./src/helper/*"],
+      "@health/*": ["./src/health/*"],
+      "@log/*": ["./src/log/*"]
     }
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "tests"]
+  "exclude": ["node_modules", "dist", "tests"],
+  "references": [{ "path": "./tsconfig.test.json" }]
 }
