@@ -1,6 +1,6 @@
 {
   "name": "redis-axon",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "A resilient Redis client with circuit breaker, connection pooling, cluster support, and automatic reconnection with exponential backoff.",
   "author": "Srajan Saxena",
   "license": "ISC",
