@@ -19,6 +19,7 @@ export class RedisConnectionPoolHandler implements IRedisConnection {
     connOptions: RedisConnectionObjectOptions,
     poolSize: number = 3,
     breakerOptions?: Partial<CircuitBreakerOptions>,
+    private readonly warmup: boolean = true,
   ) {
     this.connOptions = connOptions;
     this.poolSize = poolSize;
@@ -39,6 +40,7 @@ export class RedisConnectionPoolHandler implements IRedisConnection {
       const conn = new RedisSingleConnectionHandler(
         this.connOptions,
         this.breakerOptions,
+        this.warmup,
       );
       conn.addLogger(this.logger);
       await conn.ConnectToService();
