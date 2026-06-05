@@ -24,6 +24,8 @@ Built on top of [ioredis](https://github.com/redis/ioredis).
 - [API Reference](#api-reference)
   - [Commands](#commands)
   - [Lifecycle Methods](#lifecycle-methods)
+- [Connection Warmup](#connection-warmup)
+- [Health Check](#health-check)
 - [Reconnection Behavior](#reconnection-behavior)
 - [Logging](#logging)
 - [Testing](#testing)
@@ -86,7 +88,9 @@ const redis = new RedisSingleConnectionHandler(
     threshold: 5,
     resetTimeout: 30000,
     maxResetTimeout: 300000,
-  }
+  },
+  // warmup (optional, default true)
+  true
 );
 
 await redis.ConnectToService();
@@ -115,7 +119,9 @@ const pool = new RedisConnectionPoolHandler(
     threshold: 5,
     resetTimeout: 30000,
     maxResetTimeout: 300000,
-  }
+  },
+  // warmup (optional, default true)
+  true
 );
 
 await pool.ConnectToService();
@@ -163,7 +169,9 @@ const cluster = new RedisClusterConnectionHandler(
     threshold: 5,
     resetTimeout: 30000,
     maxResetTimeout: 300000,
-  }
+  },
+  // warmup (optional, default true)
+  true
 );
 
 await cluster.ConnectToService();
@@ -560,6 +568,207 @@ redis.onReconnect(async () => {
 
 ---
 
+## Connection Warmup
+
+By default, redis-axon runs a `PING` command after establishing each connection to verify Redis is truly responsive — not just TCP-connected.
+
+**Why warmup matters:**
+
+A TCP connection can succeed (`ready` event fires) even when:
+- Redis is overloaded and responding slowly
+- A network proxy is intercepting traffic but not forwarding to Redis
+- The connection is technically open but about to be killed by a timeout
+
+The warmup `PING` ensures your app doesn't accept traffic before Redis can actually serve commands.
+
+**Default behavior (warmup enabled):**
+
+```typescript
+const redis = new RedisSingleConnectionHandler(connOptions, breakerOpts, true);
+await redis.ConnectToService(); // resolves only after PING succeeds
+```
+
+```
+TCP connect → ready event → PING → PONG → resolve
+                                  → error → disconnect, cleanup, reject
+```
+
+**Disabling warmup:**
+
+```typescript
+// skip PING — resolve as soon as TCP + AUTH succeeds
+const redis = new RedisSingleConnectionHandler(connOptions, breakerOpts, false);
+await redis.ConnectToService(); // resolves on ready event without PING
+```
+
+**When to disable:**
+- Local dev where you know Redis is always running
+- Extremely latency-sensitive startup where 1 extra round-trip matters
+- Testing environments
+
+**Cleanup on failure:**
+
+If the warmup PING fails, redis-axon doesn't leave a zombie connection behind:
+1. Disconnects the TCP socket
+2. Removes all event listeners
+3. Nulls the connection reference
+4. Rejects the promise with the error
+
+This prevents leaked connections that would trigger phantom `close` events and unwanted reconnection cycles.
+
+**Pool warmup:**
+
+In pool mode, warmup is applied to each connection individually. All N connections must pass their PING before `ConnectToService()` resolves:
+
+```typescript
+const pool = new RedisConnectionPoolHandler(connOptions, 5, breakerOpts, true);
+await pool.ConnectToService();
+// all 5 connections have been PING'd and are confirmed responsive
+```
+
+**Cluster warmup:**
+
+In cluster mode, warmup sends a PING through the cluster (routed to the connected node). If any node is unresponsive during initial connect, it fails fast:
+
+```typescript
+const cluster = new RedisClusterConnectionHandler(clusterOpts, breakerOpts, true);
+await cluster.ConnectToService();
+// cluster is verified responsive
+```
+
+---
+
+## Health Check
+
+redis-axon provides a standalone `RedisHealthCheck` class that works with any connection mode. It uses the strategy pattern internally — one strategy per handler type — so the check logic is tailored to each.
+
+**Basic usage:**
+
+```typescript
+import { RedisSingleConnectionHandler } from "redis-axon/connection/connection.js";
+import { RedisHealthCheck } from "redis-axon/health.js";
+
+const redis = new RedisSingleConnectionHandler(connOptions);
+await redis.ConnectToService();
+
+const health = RedisHealthCheck.forSingle(redis);
+```
+
+**Factory methods (one per handler type):**
+
+```typescript
+// Single connection
+const health = RedisHealthCheck.forSingle(handler);
+
+// Connection pool
+const health = RedisHealthCheck.forPool(pool);
+
+// Cluster
+const health = RedisHealthCheck.forCluster(cluster);
+```
+
+**The check() method:**
+
+```typescript
+const result = await health.check();
+// {
+//   status: "healthy",         // "healthy" | "degraded" | "unhealthy"
+//   latencyMs: 1.23,           // PING round-trip time in ms
+//   circuitState: "CLOSED",    // current circuit breaker state
+//   connected: true,           // is the connection alive?
+//   timestamp: 1718000000000   // when the check was performed
+// }
+```
+
+**Status meanings:**
+
+| Status | Meaning |
+|--------|---------|
+| `healthy` | Connection alive, PING responded, circuit CLOSED |
+| `degraded` | PING responded but circuit is not fully CLOSED (recovering from failures) |
+| `unhealthy` | No connection or PING failed |
+
+**Quick boolean check:**
+
+```typescript
+const ok = await health.isHealthy(); // true | false
+```
+
+### Kubernetes Liveness/Readiness Probe
+
+```typescript
+import express from "express";
+import { RedisConnectionPoolHandler } from "redis-axon/connection/pool.js";
+import { RedisHealthCheck } from "redis-axon/health.js";
+
+const pool = new RedisConnectionPoolHandler(connOptions, 3);
+await pool.ConnectToService();
+
+const health = RedisHealthCheck.forPool(pool);
+const app = express();
+
+// readiness probe — is Redis ready to serve traffic?
+app.get("/health/ready", async (req, res) => {
+  const result = await health.check();
+  const code = result.status === "unhealthy" ? 503 : 200;
+  res.status(code).json(result);
+});
+
+// liveness probe — is the process alive and able to check Redis?
+app.get("/health/live", (req, res) => {
+  res.status(200).json({ status: "alive" });
+});
+```
+
+### Prometheus Metrics
+
+```typescript
+import { RedisHealthCheck } from "redis-axon/health.js";
+
+const health = RedisHealthCheck.forSingle(redis);
+
+setInterval(async () => {
+  const result = await health.check();
+  prometheus.gauge("redis_latency_ms", result.latencyMs);
+  prometheus.gauge("redis_connected", result.connected ? 1 : 0);
+  prometheus.gauge("redis_circuit_open", result.circuitState !== "CLOSED" ? 1 : 0);
+}, 5000);
+```
+
+### AWS CloudWatch Custom Metrics
+
+```typescript
+import { CloudWatch } from "@aws-sdk/client-cloudwatch";
+import { RedisHealthCheck } from "redis-axon/health.js";
+
+const cw = new CloudWatch({});
+const health = RedisHealthCheck.forPool(pool);
+
+setInterval(async () => {
+  const result = await health.check();
+  await cw.putMetricData({
+    Namespace: "MyApp/Redis",
+    MetricData: [
+      { MetricName: "Latency", Value: result.latencyMs, Unit: "Milliseconds" },
+      { MetricName: "Connected", Value: result.connected ? 1 : 0, Unit: "None" },
+    ],
+  });
+}, 10000);
+```
+
+### Pool-specific circuit state
+
+For pools, `circuitState` returns per-connection state since each connection has its own circuit breaker:
+
+```typescript
+const result = await health.check();
+console.log(result.circuitState);
+// "[0]:CLOSED, [1]:CLOSED, [2]:OPEN"
+// → connection 2 tripped, but 0 and 1 are healthy
+```
+
+---
+
 ## Reconnection Behavior
 
 When a connection drops, here's exactly what happens:
@@ -890,20 +1099,28 @@ const user = await cachedFetch("user:123", 300, async () => {
 redis-axon/
 ├── src/
 │   ├── circuit/
-│   │   └── circuitBreaker.ts    # Circuit breaker state machine
+│   │   └── circuitBreaker.ts        # Circuit breaker state machine
 │   ├── connection/
-│   │   ├── connection.ts        # Single connection handler
-│   │   ├── pool.ts              # Connection pool (round-robin)
-│   │   └── cluster.ts           # Redis Cluster handler
+│   │   ├── connection.ts            # Single connection handler
+│   │   ├── pool.ts                  # Connection pool (round-robin)
+│   │   └── cluster.ts              # Redis Cluster handler
+│   ├── health/
+│   │   ├── health.ts               # RedisHealthCheck (strategy pattern)
+│   │   ├── single.strategy.ts      # Health strategy for single connection
+│   │   ├── pool.strategy.ts        # Health strategy for pool
+│   │   └── cluster.strategy.ts     # Health strategy for cluster
 │   ├── helper/
-│   │   └── types.helper.ts      # Type definitions
-│   └── logger.ts                # Winston-based logger
+│   │   └── types.helper.ts         # All type definitions
+│   └── log/
+│       └── logger.ts               # Winston-based logger
 ├── tests/
-│   ├── circuitBreaker.test.ts   # Unit tests
-│   └── connection.test.ts       # Integration tests (testcontainers)
+│   ├── circuitBreaker.test.ts      # Unit tests
+│   ├── connection.test.ts          # Integration tests (testcontainers)
+│   └── health.test.ts             # Health check tests
+├── tsup.config.ts
+├── vitest.config.ts
 ├── package.json
-├── tsconfig.json
-└── vitest.config.ts
+└── tsconfig.json
 ```
 
 ---
