@@ -24,6 +24,7 @@ export class RedisSingleConnectionHandler implements IRedisConnection {
   public constructor(
     connOptions: RedisConnectionObjectOptions,
     breakerOptions?: Partial<CircuitBreakerOptions>,
+    private readonly warmup: boolean = true,
   ) {
     this.breaker = new CircuitBreaker(breakerOptions);
     this.logger = new RedisLogger();
@@ -46,8 +47,20 @@ export class RedisSingleConnectionHandler implements IRedisConnection {
         lazyConnect: false,
       });
 
-      client.once("ready", () => {
+      client.once("ready", async () => {
         this.redisConnection = client;
+        if (this.warmup) {
+          try {
+            await client.ping();
+            this.logger.info("Connection warmed up", "SingleConnection");
+          } catch (err) {
+            this.logger.error("Warmup PING failed", "SingleConnection", { err });
+            client.disconnect();
+            this.redisConnection = null;
+            reject(err);
+            return;
+          }
+        }
         this.logger.info("Connection ready", "SingleConnection");
         resolve();
       });
