@@ -2,9 +2,9 @@ import { Redis } from "ioredis";
 import {
   CircuitBreaker,
   type CircuitBreakerOptions,
-} from "#circuit/circuitBreaker.js";
-import { RedisLogger } from "../logger.js";
-import type { RedisConnectionObjectOptions } from "#helper/types.helper.js";
+} from "@circuit/circuitBreaker";
+import { RedisLogger } from "@log/logger";
+import type { RedisConnectionObjectOptions } from "@helper/types.helper";
 
 export interface IRedisConnection {
   redisConnection: Redis | null;
@@ -54,7 +54,9 @@ export class RedisSingleConnectionHandler implements IRedisConnection {
             await client.ping();
             this.logger.info("Connection warmed up", "SingleConnection");
           } catch (err) {
-            this.logger.error("Warmup PING failed", "SingleConnection", { err });
+            this.logger.error("Warmup PING failed", "SingleConnection", {
+              err,
+            });
             client.disconnect();
             this.redisConnection = null;
             reject(err);
@@ -77,8 +79,7 @@ export class RedisSingleConnectionHandler implements IRedisConnection {
   }
 
   private async Reconnect(): Promise<void> {
-   if (!this.breaker.canAttempt()) return;
-
+    if (!this.breaker.canAttempt()) return;
 
     const delay = this.breaker.getBackoffDelay(
       this.breaker.consecutiveFailures,
@@ -105,8 +106,8 @@ export class RedisSingleConnectionHandler implements IRedisConnection {
         attempt: this.breaker.consecutiveFailures,
         circuitState: this.breaker.getState(),
         err,
-      })
-       if (this.breaker.getState() === "OPEN") {
+      });
+      if (this.breaker.getState() === "OPEN") {
         this.logger.warn(
           "Circuit opened — pausing reconnect",
           "SingleConnection",
@@ -128,5 +129,9 @@ export class RedisSingleConnectionHandler implements IRedisConnection {
     this.redisConnection?.disconnect();
     this.redisConnection = null;
     this.logger.info("Connection shut down", "SingleConnection");
+  }
+
+  public getCircuitState() {
+    return this.breaker.getState();
   }
 }
