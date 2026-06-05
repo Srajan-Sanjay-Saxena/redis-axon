@@ -1,0 +1,28 @@
+{
+  "name": "redis-axon",
+  "version": "1.0.0",
+  "description": "",
+  "types": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.2.2",
+      "onFail": "download"
+    }
+  },
+  "type": "module",
+  "dependencies": {
+    "ioredis": "^5.11.1",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1"
+  }
+}
