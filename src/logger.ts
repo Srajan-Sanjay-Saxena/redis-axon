@@ -1,10 +1,10 @@
 import winston from "winston";
 
-export class RabbitLogger {
+export class RedisLogger {
   private logger: winston.Logger;
 
   public constructor(logger?: winston.Logger) {
-    this.logger = logger ?? RabbitLogger.createDefaultLogger();
+    this.logger = logger ?? RedisLogger.createDefaultLogger();
   }
 
   private static createDefaultLogger(): winston.Logger {
