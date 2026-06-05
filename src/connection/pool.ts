@@ -2,10 +2,10 @@ import type { Redis } from "ioredis";
 import {
   type IRedisConnection,
   RedisSingleConnectionHandler,
-} from "./connection.js";
-import { RedisLogger } from "../logger.js";
-import type { RedisConnectionObjectOptions } from "#helper/types.helper.js";
-import type { CircuitBreakerOptions } from "#circuit/circuitBreaker.js";
+} from "@connection/connection";
+import { RedisLogger } from "@log/logger";
+import type { RedisConnectionObjectOptions } from "@helper/types.helper";
+import type { CircuitBreakerOptions } from "@circuit/circuitBreaker";
 
 export class RedisConnectionPoolHandler implements IRedisConnection {
   private connections: RedisSingleConnectionHandler[] = [];
@@ -107,6 +107,12 @@ export class RedisConnectionPoolHandler implements IRedisConnection {
     this.connections = [];
     this.roundRobinIndex = 0;
     this.logger.info("Connection pool shut down", "ConnectionPool");
+  }
+
+  public getCircuitState(): string {
+    return this.connections
+      .map((c, i) => `[${i}]:${c.getCircuitState()}`)
+      .join(", ");
   }
 
   // --- BASIC KEY-VALUE ---
