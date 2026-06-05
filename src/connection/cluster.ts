@@ -24,6 +24,7 @@ export class RedisClusterConnectionHandler implements IRedisClusterConnection {
   public constructor(
     clusterOptions: RedisClusterOptions,
     breakerOptions?: Partial<CircuitBreakerOptions>,
+    private readonly warmup: boolean = true,
   ) {
     this.breaker = new CircuitBreaker(breakerOptions);
     this.logger = new RedisLogger();
@@ -64,8 +65,20 @@ export class RedisClusterConnectionHandler implements IRedisClusterConnection {
         },
       );
 
-      cluster.once("ready", () => {
+      cluster.once("ready", async () => {
         this.clusterConnection = cluster;
+        if (this.warmup) {
+          try {
+            await cluster.ping();
+            this.logger.info("Cluster connection warmed up", "ClusterConnection");
+          } catch (err) {
+            this.logger.error("Cluster warmup PING failed", "ClusterConnection", { err });
+            cluster.disconnect();
+            this.clusterConnection = null;
+            reject(err);
+            return;
+          }
+        }
         this.logger.info("Cluster connection ready", "ClusterConnection");
         resolve();
       });
