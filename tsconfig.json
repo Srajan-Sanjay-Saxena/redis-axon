@@ -11,6 +11,11 @@
     "module": "NodeNext",
     "outDir": "./dist",
     "rootDir": "./src",
+    "paths": {
+      "#connection/*" : ["./src/connection/*"],
+      "#circuit/*" : ["./src/circuit/*"],
+      "#helper/*" : ["./src/helper/*"]
+    }
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "tests"]
