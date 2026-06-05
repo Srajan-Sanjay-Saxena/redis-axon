@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { RedisContainer, type StartedRedisContainer } from "@testcontainers/redis";
-import { RedisSingleConnectionHandler } from "../src/connection/connection.js";
-import { RedisConnectionPoolHandler } from "../src/connection/pool.js";
-import type { RedisConnectionObjectOptions } from "#helper/types.helper.js";
+import { RedisSingleConnectionHandler } from "../src/connection/connection";
+import { RedisConnectionPoolHandler } from "../src/connection/pool";
+import type { RedisConnectionObjectOptions } from "@helper/types.helper";
 
 let container: StartedRedisContainer;
 let connOptions: RedisConnectionObjectOptions;
