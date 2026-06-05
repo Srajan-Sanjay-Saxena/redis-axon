@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { CircuitBreaker } from "../src/circuit/circuitBreaker"
+import { CircuitBreaker } from "@circuit/circuitBreaker"
 
 describe("CircuitBreaker", () => {
   let breaker: CircuitBreaker;
