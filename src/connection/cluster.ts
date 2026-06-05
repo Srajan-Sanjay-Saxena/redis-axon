@@ -2,9 +2,9 @@ import { Cluster } from "ioredis";
 import {
   CircuitBreaker,
   type CircuitBreakerOptions,
-} from "#circuit/circuitBreaker.js";
-import { RedisLogger } from "../logger.js";
-import type { RedisClusterOptions } from "#helper/types.helper.js";
+} from "@circuit/circuitBreaker";
+import { RedisLogger } from "@log/logger";
+import type { RedisClusterOptions } from "@helper/types.helper";
 
 export interface IRedisClusterConnection {
   clusterConnection: Cluster | null;
@@ -70,9 +70,16 @@ export class RedisClusterConnectionHandler implements IRedisClusterConnection {
         if (this.warmup) {
           try {
             await cluster.ping();
-            this.logger.info("Cluster connection warmed up", "ClusterConnection");
+            this.logger.info(
+              "Cluster connection warmed up",
+              "ClusterConnection",
+            );
           } catch (err) {
-            this.logger.error("Cluster warmup PING failed", "ClusterConnection", { err });
+            this.logger.error(
+              "Cluster warmup PING failed",
+              "ClusterConnection",
+              { err },
+            );
             cluster.disconnect();
             this.clusterConnection = null;
             reject(err);
@@ -165,6 +172,10 @@ export class RedisClusterConnectionHandler implements IRedisClusterConnection {
     this.clusterConnection?.disconnect();
     this.clusterConnection = null;
     this.logger.info("Cluster connection shut down", "ClusterConnection");
+  }
+
+  public getCircuitState() {
+    return this.breaker.getState();
   }
 
   // --- BASIC KEY-VALUE ---
