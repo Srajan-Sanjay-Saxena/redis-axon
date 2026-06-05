@@ -5,7 +5,10 @@
   "types": "module",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/circuitBreaker.test.ts",
+    "test:integration": "vitest run tests/connection.test.ts"
   },
   "keywords": [],
   "author": "",
@@ -18,11 +21,19 @@
     }
   },
   "type": "module",
+  "imports": {
+    "#connection/*": "./src/connection/*",
+    "#circuit/*": "./src/circuit/*",
+    "#helper/*": "./src/helper/*"
+  },
   "dependencies": {
     "ioredis": "^5.11.1",
     "winston": "^3.19.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1"
+    "@testcontainers/redis": "^12.0.1",
+    "@types/node": "^25.9.1",
+    "testcontainers": "^12.0.1",
+    "vitest": "^4.1.8"
   }
 }
