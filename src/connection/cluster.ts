@@ -49,6 +49,7 @@ export class RedisClusterConnectionHandler implements IRedisClusterConnection {
             connectTimeout: this.clusterOptions.connectTimeout,
             enableReadyCheck: this.clusterOptions.enableReadyCheck ?? true,
           },
+          enableOfflineQueue: this.clusterOptions.enableOfflineQueue ?? false,
           scaleReads: this.clusterOptions.scaleReads ?? "master",
           maxRedirections: this.clusterOptions.maxRedirections ?? 16,
           retryDelayOnFailover: this.clusterOptions.retryDelayOnFailover ?? 300,
