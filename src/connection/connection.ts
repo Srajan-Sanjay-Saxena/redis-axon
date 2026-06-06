@@ -43,7 +43,8 @@ export class RedisSingleConnectionHandler implements IRedisConnection {
     return new Promise((resolve, reject) => {
       const client = new Redis({
         ...this.connOptions,
-        retryStrategy: () => null, // circuit breaker owns reconnection
+        enableOfflineQueue: this.connOptions.enableOfflineQueue ?? false,
+        retryStrategy: () => null,
         lazyConnect: false,
       });
 
