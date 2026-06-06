@@ -12,6 +12,7 @@ export interface RedisConnectionObjectOptions {
     connectTimeout ?: number;
     enableAutoPipelining ?: boolean;
     enableReadyCheck ?: boolean;
+    enableOfflineQueue ?: boolean;
     maxRetriesPerRequest ?: number;
 }
 
@@ -37,6 +38,7 @@ export interface RedisClusterOptions {
     slotsRefreshInterval?: number;
     enableAutoPipelining?: boolean;
     enableReadyCheck?: boolean;
+    enableOfflineQueue?: boolean;
     commandTimeout?: number;
     keepAlive?: number;
     connectTimeout?: number;
