@@ -2,6 +2,7 @@ import { defineConfig } from "tsup";
 
 export default defineConfig({
   entry: [
+    "src/connection/commands.ts",
     "src/connection/connection.ts",
     "src/connection/pool.ts",
     "src/connection/cluster.ts",
