@@ -6,8 +6,12 @@ import {
 import { RedisLogger } from "@log/logger";
 import type { RedisConnectionObjectOptions } from "@helper/types.helper";
 import type { CircuitBreakerOptions } from "@circuit/circuitBreaker";
+import { RedisCommandHandler, type RedisClient } from "@connection/commands";
 
-export class RedisConnectionPoolHandler implements IRedisConnection {
+export class RedisConnectionPoolHandler
+  extends RedisCommandHandler
+  implements IRedisConnection
+{
   private connections: RedisSingleConnectionHandler[] = [];
   private roundRobinIndex = 0;
   private poolSize: number;
@@ -21,10 +25,18 @@ export class RedisConnectionPoolHandler implements IRedisConnection {
     breakerOptions?: Partial<CircuitBreakerOptions>,
     private readonly warmup: boolean = true,
   ) {
+    super();
     this.connOptions = connOptions;
     this.poolSize = poolSize;
     this.breakerOptions = breakerOptions;
     this.logger = new RedisLogger();
+  }
+
+  protected getClient(): RedisClient {
+    const conn = this.acquire();
+    if (!conn.redisConnection)
+      throw new Error("[ConnectionPool] No active connection");
+    return conn.redisConnection;
   }
 
   public addLogger(logger: RedisLogger): void {
@@ -61,7 +73,6 @@ export class RedisConnectionPoolHandler implements IRedisConnection {
     });
   }
 
-  // round-robins across active connections
   private acquire(): RedisSingleConnectionHandler {
     if (this.connections.length === 0)
       throw new Error("[ConnectionPool] No connections available");
@@ -88,13 +99,6 @@ export class RedisConnectionPoolHandler implements IRedisConnection {
     }
   }
 
-  private async run<T>(fn: (client: Redis) => Promise<T>): Promise<T> {
-    const conn = this.acquire();
-    if (!conn.redisConnection)
-      throw new Error("[ConnectionPool] No active connection");
-    return fn(conn.redisConnection);
-  }
-
   public onReconnect(cb: () => Promise<void>): void {
     for (const conn of this.connections) conn.onReconnect(cb);
   }
@@ -113,64 +117,5 @@ export class RedisConnectionPoolHandler implements IRedisConnection {
     return this.connections
       .map((c, i) => `[${i}]:${c.getCircuitState()}`)
       .join(", ");
-  }
-
-  // --- BASIC KEY-VALUE ---
-
-  public async set(
-    key: string,
-    value: string,
-    mode?: "EX",
-    duration?: number,
-  ): Promise<void> {
-    await this.run((c) =>
-      mode === "EX" && duration
-        ? c.set(key, value, mode, duration)
-        : c.set(key, value),
-    );
-  }
-
-  public async get(key: string): Promise<string | null> {
-    return this.run((c) => c.get(key));
-  }
-
-  public async delete(key: string): Promise<void> {
-    await this.run((c) => c.del(key));
-  }
-
-  // --- SET OPERATIONS ---
-
-  public async sadd(key: string, value: string): Promise<void> {
-    await this.run((c) => c.sadd(key, value));
-  }
-
-  public async srem(key: string, value: string): Promise<void> {
-    await this.run((c) => c.srem(key, value));
-  }
-
-  public async smembers(key: string): Promise<string[]> {
-    return this.run((c) => c.smembers(key));
-  }
-
-  // --- UTILITY ---
-
-  public async expire(key: string, seconds: number): Promise<void> {
-    await this.run((c) => c.expire(key, seconds));
-  }
-
-  public async incr(key: string): Promise<number> {
-    return this.run((c) => c.incr(key));
-  }
-
-  public async ttl(key: string): Promise<number> {
-    return this.run((c) => c.ttl(key));
-  }
-
-  public async eval(
-    script: string,
-    keys: string[],
-    args: string[],
-  ): Promise<unknown> {
-    return this.run((c) => c.eval(script, keys.length, ...keys, ...args));
   }
 }
