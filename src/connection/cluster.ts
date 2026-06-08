@@ -5,6 +5,7 @@ import {
 } from "@circuit/circuitBreaker";
 import { RedisLogger } from "@log/logger";
 import type { RedisClusterOptions } from "@helper/types.helper";
+import { RedisCommandHandler, type RedisClient } from "@connection/commands";
 
 export interface IRedisClusterConnection {
   clusterConnection: Cluster | null;
@@ -13,7 +14,10 @@ export interface IRedisClusterConnection {
   gracefulShutdown(): void;
 }
 
-export class RedisClusterConnectionHandler implements IRedisClusterConnection {
+export class RedisClusterConnectionHandler
+  extends RedisCommandHandler
+  implements IRedisClusterConnection
+{
   public clusterConnection: Cluster | null = null;
   private breaker: CircuitBreaker;
   private clusterOptions: RedisClusterOptions;
@@ -26,9 +30,15 @@ export class RedisClusterConnectionHandler implements IRedisClusterConnection {
     breakerOptions?: Partial<CircuitBreakerOptions>,
     private readonly warmup: boolean = true,
   ) {
+    super();
     this.breaker = new CircuitBreaker(breakerOptions);
     this.logger = new RedisLogger();
     this.clusterOptions = clusterOptions;
+  }
+
+  protected getClient(): RedisClient {
+    if (!this.clusterConnection) throw new Error("[Cluster] Not connected");
+    return this.clusterConnection;
   }
 
   public addLogger(logger: RedisLogger): void {
@@ -61,7 +71,7 @@ export class RedisClusterConnectionHandler implements IRedisClusterConnection {
             this.clusterOptions.slotsRefreshInterval ?? 15000,
           enableAutoPipelining:
             this.clusterOptions.enableAutoPipelining ?? false,
-          clusterRetryStrategy: () => null, // circuit breaker owns reconnection
+          clusterRetryStrategy: () => null,
           natMap: this.clusterOptions.natMap,
         },
       );
@@ -177,74 +187,5 @@ export class RedisClusterConnectionHandler implements IRedisClusterConnection {
 
   public getCircuitState() {
     return this.breaker.getState();
-  }
-
-  // --- BASIC KEY-VALUE ---
-
-  public async set(
-    key: string,
-    value: string,
-    mode?: "EX",
-    duration?: number,
-  ): Promise<void> {
-    if (!this.clusterConnection) throw new Error("Cluster not connected");
-    if (mode === "EX" && duration) {
-      await this.clusterConnection.set(key, value, mode, duration);
-    } else {
-      await this.clusterConnection.set(key, value);
-    }
-  }
-
-  public async get(key: string): Promise<string | null> {
-    if (!this.clusterConnection) throw new Error("Cluster not connected");
-    return this.clusterConnection.get(key);
-  }
-
-  public async delete(key: string): Promise<void> {
-    if (!this.clusterConnection) throw new Error("Cluster not connected");
-    await this.clusterConnection.del(key);
-  }
-
-  // --- SET OPERATIONS ---
-
-  public async sadd(key: string, value: string): Promise<void> {
-    if (!this.clusterConnection) throw new Error("Cluster not connected");
-    await this.clusterConnection.sadd(key, value);
-  }
-
-  public async srem(key: string, value: string): Promise<void> {
-    if (!this.clusterConnection) throw new Error("Cluster not connected");
-    await this.clusterConnection.srem(key, value);
-  }
-
-  public async smembers(key: string): Promise<string[]> {
-    if (!this.clusterConnection) throw new Error("Cluster not connected");
-    return this.clusterConnection.smembers(key);
-  }
-
-  // --- UTILITY ---
-
-  public async expire(key: string, seconds: number): Promise<void> {
-    if (!this.clusterConnection) throw new Error("Cluster not connected");
-    await this.clusterConnection.expire(key, seconds);
-  }
-
-  public async incr(key: string): Promise<number> {
-    if (!this.clusterConnection) throw new Error("Cluster not connected");
-    return this.clusterConnection.incr(key);
-  }
-
-  public async ttl(key: string): Promise<number> {
-    if (!this.clusterConnection) throw new Error("Cluster not connected");
-    return this.clusterConnection.ttl(key);
-  }
-
-  public async eval(
-    script: string,
-    keys: string[],
-    args: string[],
-  ): Promise<unknown> {
-    if (!this.clusterConnection) throw new Error("Cluster not connected");
-    return this.clusterConnection.eval(script, keys.length, ...keys, ...args);
   }
 }
