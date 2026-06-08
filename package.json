@@ -20,17 +20,25 @@
       "types": "./dist/connection/cluster.d.ts",
       "import": "./dist/connection/cluster.js"
     },
+    "./connection/commands.js": {
+      "types": "./dist/connection/commands.d.ts",
+      "import": "./dist/connection/commands.js"
+    },
     "./circuit/circuitBreaker.js": {
       "types": "./dist/circuit/circuitBreaker.d.ts",
       "import": "./dist/circuit/circuitBreaker.js"
     },
     "./logger.js": {
-      "types": "./dist/logger.d.ts",
-      "import": "./dist/logger.js"
+      "types": "./dist/log/logger.d.ts",
+      "import": "./dist/log/logger.js"
     },
     "./health.js": {
       "types": "./dist/health/health.d.ts",
       "import": "./dist/health/health.js"
+    },
+    "./types.js": {
+      "types": "./dist/helper/types.helper.d.ts",
+      "import": "./dist/helper/types.helper.js"
     }
   },
   "files": [
