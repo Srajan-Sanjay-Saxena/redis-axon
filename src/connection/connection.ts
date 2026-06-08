@@ -5,6 +5,7 @@ import {
 } from "@circuit/circuitBreaker";
 import { RedisLogger } from "@log/logger";
 import type { RedisConnectionObjectOptions } from "@helper/types.helper";
+import { RedisCommandHandler, type RedisClient } from "@connection/commands";
 
 export interface IRedisConnection {
   redisConnection: Redis | null;
@@ -13,7 +14,10 @@ export interface IRedisConnection {
   gracefulShutdown(): void;
 }
 
-export class RedisSingleConnectionHandler implements IRedisConnection {
+export class RedisSingleConnectionHandler
+  extends RedisCommandHandler
+  implements IRedisConnection
+{
   public redisConnection: Redis | null = null;
   private breaker: CircuitBreaker;
   private connOptions: RedisConnectionObjectOptions;
@@ -26,6 +30,7 @@ export class RedisSingleConnectionHandler implements IRedisConnection {
     breakerOptions?: Partial<CircuitBreakerOptions>,
     private readonly warmup: boolean = true,
   ) {
+    super();
     this.breaker = new CircuitBreaker(breakerOptions);
     this.logger = new RedisLogger();
     this.connOptions = {
@@ -33,6 +38,11 @@ export class RedisSingleConnectionHandler implements IRedisConnection {
       host: connOptions.host ?? "localhost",
       port: connOptions.port ?? 6379,
     };
+  }
+
+  protected getClient(): RedisClient {
+    if (!this.redisConnection) throw new Error("[SingleConnection] Not connected");
+    return this.redisConnection;
   }
 
   public addLogger(logger: RedisLogger): void {
