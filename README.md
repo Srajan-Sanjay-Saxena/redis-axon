@@ -57,8 +57,8 @@ const redis = new RedisSingleConnectionHandler({
 await redis.ConnectToService();
 
 // use it
-await redis.redisConnection!.set("hello", "world");
-const value = await redis.redisConnection!.get("hello");
+await redis.set("hello", "world");
+const value = await redis.get("hello");
 console.log(value); // "world"
 
 // when done
@@ -485,47 +485,321 @@ await cluster.ConnectToService();
 
 ### Commands
 
-All three connection modes (Single, Pool, Cluster) expose the same commands:
-
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| `set` | `set(key, value, mode?, duration?)` | Set a key. Optionally pass `"EX"` mode with duration in seconds for auto-expiry. |
-| `get` | `get(key)` → `string \| null` | Get a key's value. Returns `null` if key doesn't exist. |
-| `delete` | `delete(key)` | Delete a key. |
-| `sadd` | `sadd(key, value)` | Add a member to a set. |
-| `srem` | `srem(key, value)` | Remove a member from a set. |
-| `smembers` | `smembers(key)` → `string[]` | Get all members of a set. |
-| `expire` | `expire(key, seconds)` | Set a TTL (time-to-live) on an existing key. |
-| `incr` | `incr(key)` → `number` | Atomically increment a key's numeric value by 1. |
-| `ttl` | `ttl(key)` → `number` | Get remaining TTL in seconds. Returns `-1` if no expiry, `-2` if key doesn't exist. |
-| `eval` | `eval(script, keys, args)` → `unknown` | Execute a Lua script on the server. |
-
-**Examples:**
+All three connection modes (Single, Pool, Cluster) share the same command interface via the `RedisCommandHandler` base class. You never interact with `RedisCommandHandler` directly — your handler (Single, Pool, or Cluster) inherits these methods automatically.
 
 ```typescript
-// Key-Value
-await pool.set("user:123:name", "Alice");
-await pool.set("session:abc", "token-xyz", "EX", 3600); // expires in 1 hour
-const name = await pool.get("user:123:name"); // "Alice"
-await pool.delete("session:abc");
+// works identically on all three:
+await redis.set("key", "value");
+await pool.set("key", "value");
+await cluster.set("key", "value");
+```
 
-// Sets
-await pool.sadd("user:123:roles", "admin");
-await pool.sadd("user:123:roles", "editor");
-const roles = await pool.smembers("user:123:roles"); // ["admin", "editor"]
-await pool.srem("user:123:roles", "editor");
+---
 
-// Utility
-await pool.expire("user:123:name", 86400); // expire in 24 hours
-const remaining = await pool.ttl("user:123:name"); // seconds left
-const count = await pool.incr("page:views"); // atomic counter
+#### `set(key, value, mode?, duration?)`
 
-// Lua scripting
-const result = await pool.eval(
-  "return redis.call('GET', KEYS[1])",
-  ["my-key"],
-  []
-);
+Store a string value under a key.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `key` | `string` | The key name |
+| `value` | `string` | The value to store |
+| `mode` | `"EX"` (optional) | If `"EX"`, sets an expiry in seconds |
+| `duration` | `number` (optional) | Seconds until the key expires (required when mode is `"EX"`) |
+
+**Returns:** `Promise<void>`
+
+**Use cases:**
+- Caching API responses, DB query results, computed values
+- Storing session tokens with automatic expiry
+- Feature flags, config values, temporary locks
+
+```typescript
+// store forever
+await redis.set("user:123:name", "Alice");
+
+// store with 1-hour TTL
+await redis.set("session:abc", "token-xyz", "EX", 3600);
+
+// cache an API response for 5 minutes
+await redis.set("cache:weather:london", JSON.stringify(apiResponse), "EX", 300);
+```
+
+---
+
+#### `get(key)`
+
+Retrieve the value stored at a key.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `key` | `string` | The key to look up |
+
+**Returns:** `Promise<string | null>` — `null` if the key doesn't exist or has expired.
+
+**Use cases:**
+- Reading cached data before hitting the database
+- Retrieving session/token data
+- Checking feature flag values
+
+```typescript
+const session = await redis.get("session:abc");
+if (!session) {
+  // cache miss or expired — fetch from source
+}
+
+// parse JSON values
+const user = JSON.parse((await redis.get("user:123")) ?? "null");
+```
+
+---
+
+#### `delete(key)`
+
+Remove a key and its value.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `key` | `string` | The key to delete |
+
+**Returns:** `Promise<void>`
+
+**Use cases:**
+- Invalidating cache entries when source data changes
+- Logging out a user (delete their session key)
+- Releasing a distributed lock
+
+```typescript
+// invalidate cache after a write
+await db.users.update(123, { name: "Bob" });
+await redis.delete("cache:user:123");
+
+// logout
+await redis.delete(`session:${sessionId}`);
+```
+
+---
+
+#### `sadd(key, value)`
+
+Add a member to a Redis Set. Sets are unordered collections of unique strings.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `key` | `string` | The set key |
+| `value` | `string` | The member to add |
+
+**Returns:** `Promise<void>`
+
+**Use cases:**
+- Tracking unique visitors, active users, online devices
+- Tagging systems (a post's tags, a user's roles)
+- Maintaining allow/deny lists
+
+```typescript
+await redis.sadd("user:123:roles", "admin");
+await redis.sadd("user:123:roles", "editor");
+await redis.sadd("user:123:roles", "admin"); // no-op, already exists
+
+// track unique page visitors today
+await redis.sadd(`visitors:${today}`, userId);
+```
+
+---
+
+#### `srem(key, value)`
+
+Remove a member from a Redis Set.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `key` | `string` | The set key |
+| `value` | `string` | The member to remove |
+
+**Returns:** `Promise<void>`
+
+**Use cases:**
+- Revoking a role or permission
+- Removing a device from an active set
+- Un-tagging content
+
+```typescript
+await redis.srem("user:123:roles", "admin");
+```
+
+---
+
+#### `smembers(key)`
+
+Get all members of a Redis Set.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `key` | `string` | The set key |
+
+**Returns:** `Promise<string[]>` — empty array if key doesn't exist.
+
+**Use cases:**
+- Listing a user's roles/permissions for authorization checks
+- Getting all tags on a resource
+- Retrieving all active sessions for a user
+
+```typescript
+const roles = await redis.smembers("user:123:roles"); // ["editor"]
+
+// authorization check
+if (roles.includes("admin")) {
+  // allow admin action
+}
+```
+
+---
+
+#### `expire(key, seconds)`
+
+Set a time-to-live on an existing key. The key is automatically deleted after the TTL expires.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `key` | `string` | The key to set TTL on |
+| `seconds` | `number` | TTL in seconds |
+
+**Returns:** `Promise<void>`
+
+**Use cases:**
+- Adding expiry to a key that was originally set without one
+- Extending/refreshing a session's lifetime on activity
+- Auto-cleanup of temporary data (locks, rate limit counters)
+
+```typescript
+// refresh session TTL on every request
+await redis.expire(`session:${sessionId}`, 3600);
+
+// auto-delete a temporary upload token in 10 minutes
+await redis.set("upload:token:abc", userId);
+await redis.expire("upload:token:abc", 600);
+```
+
+---
+
+#### `incr(key)`
+
+Atomically increment a key's integer value by 1. If the key doesn't exist, it's initialized to `0` before incrementing (so the result is `1`).
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `key` | `string` | The key to increment |
+
+**Returns:** `Promise<number>` — the value after incrementing.
+
+**Use cases:**
+- Rate limiting (count requests per window)
+- Counters (page views, API calls, error counts)
+- Generating sequential IDs
+- Tracking quota usage
+
+```typescript
+// rate limiter
+const count = await redis.incr(`ratelimit:${userId}:${currentMinute}`);
+if (count === 1) await redis.expire(`ratelimit:${userId}:${currentMinute}`, 60);
+if (count > 100) throw new Error("Rate limited");
+
+// page view counter
+const views = await redis.incr("page:views:/home");
+```
+
+---
+
+#### `ttl(key)`
+
+Get the remaining time-to-live of a key in seconds.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `key` | `string` | The key to check |
+
+**Returns:** `Promise<number>`
+- Positive number → seconds remaining
+- `-1` → key exists but has no expiry
+- `-2` → key doesn't exist
+
+**Use cases:**
+- Checking if a cache entry is about to expire (refresh proactively)
+- Debugging TTL issues
+- Showing "session expires in X minutes" to users
+
+```typescript
+const remaining = await redis.ttl("session:abc");
+if (remaining < 300) {
+  // less than 5 minutes left — refresh
+  await redis.expire("session:abc", 3600);
+}
+
+if (remaining === -2) {
+  // key doesn't exist at all
+}
+```
+
+---
+
+#### `eval(script, keys, args)`
+
+Execute a Lua script atomically on the Redis server. The script runs as a single operation — no other command can execute between its steps.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `script` | `string` | Lua script source code |
+| `keys` | `string[]` | Redis keys the script accesses (available as `KEYS[1]`, `KEYS[2]`, ...) |
+| `args` | `string[]` | Additional arguments (available as `ARGV[1]`, `ARGV[2]`, ...) |
+
+**Returns:** `Promise<unknown>` — whatever the Lua script returns.
+
+**Use cases:**
+- Atomic compare-and-set (check a value and update only if condition holds)
+- Distributed locks (SET NX + custom logic)
+- Complex operations that need to read + write atomically
+- Rate limiters that need to increment and check in one round-trip
+
+```typescript
+// atomic "delete only if value matches" (safe lock release)
+const unlockScript = `
+  if redis.call("GET", KEYS[1]) == ARGV[1] then
+    return redis.call("DEL", KEYS[1])
+  else
+    return 0
+  end
+`;
+await redis.eval(unlockScript, ["lock:resource"], ["my-lock-token"]);
+
+// atomic rate limiter (increment + set expiry + check limit in one call)
+const rateLimitScript = `
+  local count = redis.call("INCR", KEYS[1])
+  if count == 1 then
+    redis.call("EXPIRE", KEYS[1], ARGV[1])
+  end
+  return count
+`;
+const count = await redis.eval(rateLimitScript, [`ratelimit:${userId}`], ["60"]);
+```
+
+---
+
+#### Accessing the raw ioredis client
+
+If you need commands not exposed by `RedisCommandHandler`, you can still access the underlying ioredis instance directly:
+
+```typescript
+// single
+const raw = redis.redisConnection!;
+await raw.hset("hash:key", "field", "value");
+
+// pool (gets the next healthy connection via round-robin)
+const raw = pool.redisConnection!;
+await raw.lpush("list:key", "item");
+
+// cluster
+const raw = cluster.clusterConnection!;
+await raw.publish("channel", "message");
 ```
 
 ### Lifecycle Methods
@@ -923,13 +1197,12 @@ const redis = new RedisSingleConnectionHandler({
   password: "",
 });
 await redis.ConnectToService();
-const client = redis.redisConnection!;
 
 async function isRateLimited(userId: string, limit: number, windowSeconds: number): Promise<boolean> {
   const key = `ratelimit:${userId}`;
-  const current = await client.incr(key);
+  const current = await redis.incr(key);
   if (current === 1) {
-    await client.expire(key, windowSeconds);
+    await redis.expire(key, windowSeconds);
   }
   return current > limit;
 }
@@ -1101,6 +1374,7 @@ redis-axon/
 │   ├── circuit/
 │   │   └── circuitBreaker.ts        # Circuit breaker state machine
 │   ├── connection/
+│   │   ├── commands.ts              # RedisCommandHandler base class (shared commands)
 │   │   ├── connection.ts            # Single connection handler
 │   │   ├── pool.ts                  # Connection pool (round-robin)
 │   │   └── cluster.ts              # Redis Cluster handler
