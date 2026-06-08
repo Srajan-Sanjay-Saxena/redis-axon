@@ -1401,4 +1401,4 @@ redis-axon/
 
 ## License
 
-ISC
+MIT
