@@ -124,22 +124,20 @@ describe("RedisConnectionPoolHandler", () => {
 
   it("can delete via pool", async () => {
     await pool.set("pool:del", "gone");
-    await pool.delete("pool:del");
+    const count = await pool.delete("pool:del");
+    expect(count).toBe(1);
     const value = await pool.get("pool:del");
     expect(value).toBeNull();
   });
 
   it("can use set operations via pool", async () => {
-    await pool.sadd("pool:set", "x");
-    await pool.sadd("pool:set", "y");
-    await pool.sadd("pool:set", "z");
+    await pool.sadd("pool:set", "x", "y", "z");
     const members = await pool.smembers("pool:set");
     expect(members.sort()).toEqual(["x", "y", "z"]);
   });
 
   it("can srem via pool", async () => {
-    await pool.sadd("pool:srem", "a");
-    await pool.sadd("pool:srem", "b");
+    await pool.sadd("pool:srem", "a", "b");
     await pool.srem("pool:srem", "a");
     const members = await pool.smembers("pool:srem");
     expect(members).toEqual(["b"]);
