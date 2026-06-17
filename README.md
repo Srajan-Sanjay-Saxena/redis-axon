@@ -528,32 +528,45 @@ Store a string value under a key. Supports all Redis SET options.
 **Valid call patterns:**
 
 ```typescript
-// no options — store forever, overwrite always
-await redis.set("key", "value");
+// 1. Basic set — no options
+// Saves the user's name. It will stay in Redis until manually deleted.
+await redis.set("user:1001", "Alice");
 
-// expire in 60 seconds
-await redis.set("key", "value", "EX", 60);
+// 2. Setting an expiration time
+// "EX" means seconds. This caches a session token that auto-deletes after 1 hour.
+await redis.set("session:abcde123", "active", "EX", 3600);
 
-// expire in 5000 milliseconds
-await redis.set("key", "value", "PX", 5000);
+// "PX" means milliseconds. This caches data for exactly 500ms.
+await redis.set("rate_limit:ip_127", "1", "PX", 500);
 
-// expire at specific unix timestamp
-await redis.set("key", "value", "EXAT", 1718000000);
+// "EXAT" means expire at a specific unix timestamp (seconds).
+await redis.set("promo:banner", "summer-sale", "EXAT", 1718000000);
 
-// only set if key doesn't exist (distributed lock)
-await redis.set("lock:resource", "owner-id", "NX");
+// "PXAT" means expire at a specific unix timestamp (milliseconds).
+await redis.set("flash:deal", "active", "PXAT", 1718000000000);
 
-// only set if key exists (safe update)
-await redis.set("config:flag", "new-value", "XX");
+// 3. Conditional saving (existence flags)
+// "NX" (Not eXists) — only saves if the key DOES NOT exist yet.
+// Great for ensuring only one server runs a background job (distributed lock).
+await redis.set("lock:daily_job", "locked", "NX");
 
-// NX + EX combined (lock with auto-expiry)
-await redis.set("lock:resource", "owner-id", "EX", 30, "NX");
+// "XX" (eXists) — only saves if the key ALREADY exists.
+// Great for updating data only if it hasn't been wiped out by something else.
+await redis.set("user:1001:status", "online", "XX");
 
-// or in reversed order
-await redis.set("lock:resource", "owner-id", "NX", "EX", 30);
+// 4. Combining expiration + flags
+// Saves a lock that automatically breaks after 30 seconds
+// so the system doesn't freeze if a process crashes.
+await redis.set("lock:process_video", "locked", "EX", 30, "NX");
 
-// overwrite but keep existing TTL
-await redis.set("key", "new-value", "KEEPTTL", 0);
+// Same thing, reversed order — both are valid.
+await redis.set("lock:process_video", "locked", "NX", "EX", 30);
+
+// 5. Keeping the existing TTL (KEEPTTL)
+// Updates the value to "Bob" but leaves the existing countdown timer exactly as it was.
+// Use case: user's session expires in 30 minutes, you update their cached profile
+// without resetting the 30-minute timer.
+await redis.set("user:1001", "Bob", "KEEPTTL", 0);
 ```
 
 **Use cases:**
@@ -575,18 +588,32 @@ Retrieve the value stored at a key.
 
 **Returns:** `Promise<string | null>` — `null` if the key doesn't exist or has expired.
 
-**Use cases:**
-- Reading cached data before hitting the database
-- Retrieving session/token data
-- Checking feature flag values
-
 ```typescript
-const session = await redis.get("session:abc");
-if (!session) {
-  // cache miss or expired — fetch from source
+// 1. Basic cache lookup
+// Check if we already have the user's profile cached before hitting the database.
+const cached = await redis.get("cache:user:1001");
+if (cached) {
+  return JSON.parse(cached); // cache hit — skip the DB query entirely
 }
 
-// parse JSON values
+// 2. Session validation
+// On every API request, verify the session token is still valid.
+const session = await redis.get(`session:${req.headers["x-session-id"]}`);
+if (!session) {
+  // null means either: key never existed, or it expired.
+  // Either way, user needs to re-authenticate.
+  return res.status(401).json({ error: "session expired" });
+}
+
+// 3. Feature flag check
+// Check if dark mode is enabled for this tenant.
+const darkMode = await redis.get("feature:dark-mode:tenant-42");
+if (darkMode === "true") {
+  // render dark UI
+}
+
+// 4. Safe JSON parsing
+// get() returns a string or null. Parse JSON safely with a fallback.
 const user = JSON.parse((await redis.get("user:123")) ?? "null");
 ```
 
@@ -602,22 +629,38 @@ Delete one or more keys and their values in a single call.
 
 **Returns:** `Promise<number>` — the number of keys that were actually deleted (0 if none existed).
 
-**Use cases:**
-- Invalidating cache entries when source data changes
-- Bulk cleanup of related keys
-- Logging out a user (delete their session key)
-- Releasing a distributed lock
-
 ```typescript
-// single key
-await redis.delete("cache:user:123");
+// 1. Cache invalidation after a write
+// User updated their profile — delete the stale cached version
+// so the next read fetches fresh data from the database.
+await db.users.update(1001, { name: "Bob" });
+await redis.delete("cache:user:1001");
 
-// multiple keys in one call (single round-trip)
-const deleted = await redis.delete("session:a", "session:b", "session:c");
-console.log(`Deleted ${deleted} keys`);
+// 2. Logging out a user
+// Destroy the session so any further requests with this token are rejected.
+await redis.delete(`session:${sessionId}`);
 
-// returns 0 if key didn't exist
-const count = await redis.delete("nonexistent"); // 0
+// 3. Bulk cleanup in one round-trip
+// User is being deleted — wipe all their related keys at once.
+// This is ONE network call regardless of how many keys you pass.
+const deleted = await redis.delete(
+  `user:${id}:profile`,
+  `user:${id}:settings`,
+  `user:${id}:notifications`,
+  `session:${id}`,
+);
+console.log(`Cleaned up ${deleted} keys`);
+
+// 4. Releasing a lock (simple version)
+// After finishing a background job, release the lock so others can run.
+await redis.delete("lock:send-daily-emails");
+
+// 5. Checking if something existed
+// Returns 0 if the key wasn't there — useful for idempotency checks.
+const count = await redis.delete("one-time-token:abc");
+if (count === 0) {
+  throw new Error("Token already used or expired");
+}
 ```
 
 ---
@@ -633,22 +676,30 @@ Add one or more members to a Redis Set. Sets are unordered collections of unique
 
 **Returns:** `Promise<number>` — the number of members that were newly added (excludes already-existing members).
 
-**Use cases:**
-- Tracking unique visitors, active users, online devices
-- Tagging systems (a post's tags, a user's roles)
-- Maintaining allow/deny lists
-- Batch-adding multiple items in one round-trip
-
 ```typescript
-// single member
+// 1. Assigning roles to a user
+// If "admin" is already in the set, Redis silently ignores it — no duplicates ever.
 await redis.sadd("user:123:roles", "admin");
+await redis.sadd("user:123:roles", "admin"); // returns 0, no-op
 
-// multiple members in one call
+// 2. Batch-adding multiple roles in one network call
+// Only newly added members are counted in the return value.
 const added = await redis.sadd("user:123:roles", "admin", "editor", "viewer");
-console.log(`${added} new roles added`); // only counts newly added ones
+console.log(`${added} new roles assigned`); // e.g. 2 if "admin" already existed
 
-// track unique page visitors today
-await redis.sadd(`visitors:${today}`, userId1, userId2, userId3);
+// 3. Tracking unique visitors per day
+// Even if the same user hits 50 pages, they only count once in the set.
+await redis.sadd(`visitors:2024-06-15`, userId);
+// At end of day: smembers gives you unique visitor list,
+// set size gives you unique visitor count.
+
+// 4. Building a tag system
+// Each post has a set of tags. Adding the same tag twice is harmless.
+await redis.sadd(`post:${postId}:tags`, "typescript", "redis", "backend");
+
+// 5. Online presence tracking
+// When a user connects via WebSocket, add them to the online set.
+await redis.sadd("online:users", `user:${userId}`);
 ```
 
 ---
@@ -664,18 +715,27 @@ Remove one or more members from a Redis Set.
 
 **Returns:** `Promise<number>` — the number of members that were actually removed (0 if none were in the set).
 
-**Use cases:**
-- Revoking roles or permissions
-- Removing devices from an active set
-- Bulk un-tagging content
-
 ```typescript
-// single member
+// 1. Revoking a permission
+// User no longer needs admin access. Remove it from their role set.
 await redis.srem("user:123:roles", "admin");
 
-// multiple members
-const removed = await redis.srem("user:123:roles", "admin", "editor");
-console.log(`${removed} roles revoked`);
+// 2. Bulk permission revocation
+// Employee leaving — strip all elevated roles in one call.
+const removed = await redis.srem("user:123:roles", "admin", "editor", "moderator");
+console.log(`${removed} roles revoked`); // only counts roles that actually existed
+
+// 3. User going offline
+// When WebSocket disconnects, remove from the online set.
+await redis.srem("online:users", `user:${userId}`);
+
+// 4. Un-tagging content
+// Post no longer relevant to "redis" topic.
+await redis.srem(`post:${postId}:tags`, "redis");
+
+// 5. Idempotent removal
+// Removing something that isn't in the set returns 0, doesn't throw.
+const count = await redis.srem("user:123:roles", "nonexistent-role"); // 0
 ```
 
 ---
@@ -690,17 +750,27 @@ Get all members of a Redis Set.
 
 **Returns:** `Promise<string[]>` — empty array if key doesn't exist.
 
-**Use cases:**
-- Listing a user's roles/permissions for authorization checks
-- Getting all tags on a resource
-- Retrieving all active sessions for a user
-
 ```typescript
-const roles = await redis.smembers("user:123:roles"); // ["editor", "viewer"]
-
-if (roles.includes("admin")) {
-  // allow admin action
+// 1. Authorization check
+// Get all roles, then decide if the user can perform this action.
+const roles = await redis.smembers("user:123:roles");
+if (!roles.includes("admin")) {
+  throw new Error("Forbidden: admin role required");
 }
+
+// 2. Listing tags on a resource
+// Show all tags on a blog post for the UI.
+const tags = await redis.smembers(`post:${postId}:tags`);
+// ["typescript", "redis", "backend"]
+
+// 3. Getting all online users
+// For a dashboard that shows who's currently connected.
+const onlineUsers = await redis.smembers("online:users");
+console.log(`${onlineUsers.length} users online`);
+
+// 4. Non-existent key returns empty array (not null, not error)
+// Safe to iterate immediately without null checks.
+const empty = await redis.smembers("nonexistent:set"); // []
 ```
 
 ---
@@ -716,18 +786,31 @@ Set a time-to-live on an existing key. The key is automatically deleted after th
 
 **Returns:** `Promise<void>`
 
-**Use cases:**
-- Adding expiry to a key that was originally set without one
-- Extending/refreshing a session's lifetime on activity
-- Auto-cleanup of temporary data (locks, rate limit counters)
-
 ```typescript
-// refresh session TTL on every request
+// 1. Sliding session expiry
+// Every time the user makes a request, reset their session timer to 1 hour.
+// If they're inactive for 1 hour, it auto-deletes and they get logged out.
 await redis.expire(`session:${sessionId}`, 3600);
 
-// auto-delete a temporary upload token in 10 minutes
+// 2. Adding expiry AFTER creating a key
+// Sometimes you set() without expiry first, then conditionally add one.
 await redis.set("upload:token:abc", userId);
-await redis.expire("upload:token:abc", 600);
+if (isTemporaryUpload) {
+  await redis.expire("upload:token:abc", 600); // 10 minutes
+}
+
+// 3. Rate limit window cleanup
+// After incrementing a counter, ensure it auto-deletes when the window ends.
+const count = await redis.incr(`ratelimit:${ip}`);
+if (count === 1) {
+  // First request in this window — set the window duration.
+  await redis.expire(`ratelimit:${ip}`, 60);
+}
+
+// 4. Auto-expiring feature flags
+// Roll out a feature for 24 hours, then it automatically turns off.
+await redis.set("feature:flash-sale", "true");
+await redis.expire("feature:flash-sale", 86400); // 24 hours
 ```
 
 ---
@@ -742,20 +825,34 @@ Atomically increment a key's integer value by 1. If the key doesn't exist, it's 
 
 **Returns:** `Promise<number>` — the value after incrementing.
 
-**Use cases:**
-- Rate limiting (count requests per window)
-- Counters (page views, API calls, error counts)
-- Generating sequential IDs
-- Tracking quota usage
-
 ```typescript
-// rate limiter
-const count = await redis.incr(`ratelimit:${userId}:${currentMinute}`);
-if (count === 1) await redis.expire(`ratelimit:${userId}:${currentMinute}`, 60);
-if (count > 100) throw new Error("Rate limited");
+// 1. Rate limiter (most common use case)
+// Count how many requests this user has made in the current minute.
+// If it's their first request, set the window to expire in 60 seconds.
+const key = `ratelimit:${userId}:${currentMinute}`;
+const count = await redis.incr(key);
+if (count === 1) await redis.expire(key, 60); // start the 60s window
+if (count > 100) throw new Error("Rate limited: 100 req/min exceeded");
 
-// page view counter
+// 2. Page view counter
+// Every time someone loads /home, increment. No race conditions even
+// if 1000 requests hit simultaneously — Redis INCR is atomic.
 const views = await redis.incr("page:views:/home");
+
+// 3. Generating sequential IDs
+// Each call returns a unique incrementing number — no collisions.
+const orderId = await redis.incr("counter:orders"); // 1, 2, 3, ...
+
+// 4. Tracking API quota usage
+// User gets 10,000 API calls per month. Track how many they've used.
+const used = await redis.incr(`quota:${userId}:${currentMonth}`);
+if (used > 10000) throw new Error("Monthly quota exceeded");
+
+// 5. Error counting for alerting
+// If errors exceed threshold, trigger an alert.
+const errors = await redis.incr("errors:payment-service:5min");
+if (errors === 1) await redis.expire("errors:payment-service:5min", 300);
+if (errors > 50) alertOncall("Payment service error spike");
 ```
 
 ---
@@ -773,21 +870,40 @@ Get the remaining time-to-live of a key in seconds.
 - `-1` → key exists but has no expiry
 - `-2` → key doesn't exist
 
-**Use cases:**
-- Checking if a cache entry is about to expire (refresh proactively)
-- Debugging TTL issues
-- Showing "session expires in X minutes" to users
-
 ```typescript
-const remaining = await redis.ttl("session:abc");
-if (remaining < 300) {
-  // less than 5 minutes left — refresh
-  await redis.expire("session:abc", 3600);
+// 1. Proactive cache refresh
+// If the cache is about to expire, refresh it in the background
+// so the next user doesn't experience a slow cache miss.
+const remaining = await redis.ttl("cache:product-catalog");
+if (remaining < 60 && remaining > 0) {
+  // Less than 1 minute left — refresh in background
+  refreshCacheInBackground();
 }
 
-if (remaining === -2) {
-  // key doesn't exist at all
+// 2. Session sliding expiry check
+// Only extend the session if it's close to expiring (avoid unnecessary writes).
+const sessionTtl = await redis.ttl(`session:${sessionId}`);
+if (sessionTtl < 300 && sessionTtl > 0) {
+  // Less than 5 minutes left — extend by another hour
+  await redis.expire(`session:${sessionId}`, 3600);
 }
+
+// 3. Checking if a key exists vs expired vs never had TTL
+const ttl = await redis.ttl("some:key");
+if (ttl === -2) {
+  // Key doesn't exist at all — never created or already expired & deleted
+}
+if (ttl === -1) {
+  // Key exists but has NO expiry — it will live forever until manually deleted
+}
+if (ttl > 0) {
+  // Key exists and will auto-delete in `ttl` seconds
+  console.log(`Expires in ${ttl} seconds`);
+}
+
+// 4. Show "session expires in X minutes" to the user
+const secondsLeft = await redis.ttl(`session:${sessionId}`);
+res.json({ expiresInMinutes: Math.ceil(secondsLeft / 60) });
 ```
 
 ---
@@ -804,14 +920,22 @@ Execute a Lua script atomically on the Redis server. The script runs as a single
 
 **Returns:** `Promise<unknown>` — whatever the Lua script returns.
 
-**Use cases:**
-- Atomic compare-and-set (check a value and update only if condition holds)
-- Distributed locks (SET NX + custom logic)
-- Complex operations that need to read + write atomically
-- Rate limiters that need to increment and check in one round-trip
+**Why use eval instead of multiple commands?**
+
+Without eval, this race condition is possible:
+```
+Server A: GET lock → "owner-a" ✓ (it's mine)
+Server B: GET lock → "owner-a" 
+Server A: DEL lock (releases it)
+Server B: DEL lock (ALSO deletes it — but it was already re-acquired by Server C!)
+```
+
+With eval, the GET + conditional DEL is one atomic step — no other command can sneak in between.
 
 ```typescript
-// atomic "delete only if value matches" (safe lock release)
+// 1. Safe lock release (compare-and-delete)
+// Only delete the lock if we still own it.
+// Without this atomicity, another process could steal the lock between our GET and DEL.
 const unlockScript = `
   if redis.call("GET", KEYS[1]) == ARGV[1] then
     return redis.call("DEL", KEYS[1])
@@ -819,9 +943,15 @@ const unlockScript = `
     return 0
   end
 `;
-await redis.eval(unlockScript, ["lock:resource"], ["my-lock-token"]);
+const released = await redis.eval(unlockScript, ["lock:send-emails"], [myLockToken]);
+if (released === 0) {
+  console.warn("Lock was already taken by someone else");
+}
 
-// atomic rate limiter (increment + set expiry + check limit in one call)
+// 2. Atomic rate limiter (increment + set expiry in one call)
+// Problem with separate INCR + EXPIRE: if the process crashes between them,
+// the key lives forever and the user is permanently rate-limited.
+// Eval makes it all-or-nothing.
 const rateLimitScript = `
   local count = redis.call("INCR", KEYS[1])
   if count == 1 then
@@ -830,6 +960,21 @@ const rateLimitScript = `
   return count
 `;
 const count = await redis.eval(rateLimitScript, [`ratelimit:${userId}`], ["60"]);
+if (count as number > 100) throw new Error("Rate limited");
+
+// 3. Atomic "get and delete" (consume a one-time token)
+// Verify the token exists AND delete it in one step.
+// If two requests hit simultaneously with the same token, only one succeeds.
+const consumeToken = `
+  local val = redis.call("GET", KEYS[1])
+  if val then
+    redis.call("DEL", KEYS[1])
+    return val
+  end
+  return nil
+`;
+const payload = await redis.eval(consumeToken, [`otp:${code}`], []);
+if (!payload) throw new Error("Invalid or already-used token");
 ```
 
 ---
