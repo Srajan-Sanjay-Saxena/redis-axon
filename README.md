@@ -496,34 +496,72 @@ await cluster.set("key", "value");
 
 ---
 
-#### `set(key, value, mode?, duration?)`
+#### `set(key, value, ...options)`
 
-Store a string value under a key.
+Store a string value under a key. Supports all Redis SET options.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `key` | `string` | The key name |
 | `value` | `string` | The value to store |
-| `mode` | `"EX"` (optional) | If `"EX"`, sets an expiry in seconds |
-| `duration` | `number` (optional) | Seconds until the key expires (required when mode is `"EX"`) |
+| `options` | variadic | Optional combination of expiry mode, duration, and/or conditional flag |
+
+**Expiry modes (pick one):**
+
+| Mode | Arg | Description |
+|------|-----|-------------|
+| `"EX"` | seconds | Expire in N seconds |
+| `"PX"` | milliseconds | Expire in N milliseconds |
+| `"EXAT"` | unix timestamp (s) | Expire at specific unix time (seconds) |
+| `"PXAT"` | unix timestamp (ms) | Expire at specific unix time (milliseconds) |
+| `"KEEPTTL"` | — | Retain the existing TTL when overwriting a key |
+
+**Conditional flags (pick one):**
+
+| Flag | Description |
+|------|-------------|
+| `"NX"` | Only set if key does **not** exist (create-only). Use for distributed locks. |
+| `"XX"` | Only set if key **does** exist (update-only). Use for safe overwrites. |
 
 **Returns:** `Promise<void>`
 
-**Use cases:**
-- Caching API responses, DB query results, computed values
-- Storing session tokens with automatic expiry
-- Feature flags, config values, temporary locks
+**Valid call patterns:**
 
 ```typescript
-// store forever
-await redis.set("user:123:name", "Alice");
+// no options — store forever, overwrite always
+await redis.set("key", "value");
 
-// store with 1-hour TTL
-await redis.set("session:abc", "token-xyz", "EX", 3600);
+// expire in 60 seconds
+await redis.set("key", "value", "EX", 60);
 
-// cache an API response for 5 minutes
-await redis.set("cache:weather:london", JSON.stringify(apiResponse), "EX", 300);
+// expire in 5000 milliseconds
+await redis.set("key", "value", "PX", 5000);
+
+// expire at specific unix timestamp
+await redis.set("key", "value", "EXAT", 1718000000);
+
+// only set if key doesn't exist (distributed lock)
+await redis.set("lock:resource", "owner-id", "NX");
+
+// only set if key exists (safe update)
+await redis.set("config:flag", "new-value", "XX");
+
+// NX + EX combined (lock with auto-expiry)
+await redis.set("lock:resource", "owner-id", "EX", 30, "NX");
+
+// or in reversed order
+await redis.set("lock:resource", "owner-id", "NX", "EX", 30);
+
+// overwrite but keep existing TTL
+await redis.set("key", "new-value", "KEEPTTL", 0);
 ```
+
+**Use cases:**
+- Caching API responses: `set(key, json, "EX", 300)`
+- Session tokens: `set(sessionId, token, "EX", 3600)`
+- Distributed locks: `set(lockKey, ownerId, "EX", 30, "NX")`
+- Feature flags: `set("feature:dark-mode", "true")`
+- Conditional updates: `set(key, value, "XX")` — only update if someone already created it
 
 ---
 
@@ -554,77 +592,90 @@ const user = JSON.parse((await redis.get("user:123")) ?? "null");
 
 ---
 
-#### `delete(key)`
+#### `delete(...keys)`
 
-Remove a key and its value.
+Delete one or more keys and their values in a single call.
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `key` | `string` | The key to delete |
+| `keys` | `...string[]` | One or more keys to delete |
 
-**Returns:** `Promise<void>`
+**Returns:** `Promise<number>` — the number of keys that were actually deleted (0 if none existed).
 
 **Use cases:**
 - Invalidating cache entries when source data changes
+- Bulk cleanup of related keys
 - Logging out a user (delete their session key)
 - Releasing a distributed lock
 
 ```typescript
-// invalidate cache after a write
-await db.users.update(123, { name: "Bob" });
+// single key
 await redis.delete("cache:user:123");
 
-// logout
-await redis.delete(`session:${sessionId}`);
+// multiple keys in one call (single round-trip)
+const deleted = await redis.delete("session:a", "session:b", "session:c");
+console.log(`Deleted ${deleted} keys`);
+
+// returns 0 if key didn't exist
+const count = await redis.delete("nonexistent"); // 0
 ```
 
 ---
 
-#### `sadd(key, value)`
+#### `sadd(key, ...members)`
 
-Add a member to a Redis Set. Sets are unordered collections of unique strings.
+Add one or more members to a Redis Set. Sets are unordered collections of unique strings. Duplicates are silently ignored.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `key` | `string` | The set key |
-| `value` | `string` | The member to add |
+| `members` | `...string[]` | One or more members to add |
 
-**Returns:** `Promise<void>`
+**Returns:** `Promise<number>` — the number of members that were newly added (excludes already-existing members).
 
 **Use cases:**
 - Tracking unique visitors, active users, online devices
 - Tagging systems (a post's tags, a user's roles)
 - Maintaining allow/deny lists
+- Batch-adding multiple items in one round-trip
 
 ```typescript
+// single member
 await redis.sadd("user:123:roles", "admin");
-await redis.sadd("user:123:roles", "editor");
-await redis.sadd("user:123:roles", "admin"); // no-op, already exists
+
+// multiple members in one call
+const added = await redis.sadd("user:123:roles", "admin", "editor", "viewer");
+console.log(`${added} new roles added`); // only counts newly added ones
 
 // track unique page visitors today
-await redis.sadd(`visitors:${today}`, userId);
+await redis.sadd(`visitors:${today}`, userId1, userId2, userId3);
 ```
 
 ---
 
-#### `srem(key, value)`
+#### `srem(key, ...members)`
 
-Remove a member from a Redis Set.
+Remove one or more members from a Redis Set.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `key` | `string` | The set key |
-| `value` | `string` | The member to remove |
+| `members` | `...string[]` | One or more members to remove |
 
-**Returns:** `Promise<void>`
+**Returns:** `Promise<number>` — the number of members that were actually removed (0 if none were in the set).
 
 **Use cases:**
-- Revoking a role or permission
-- Removing a device from an active set
-- Un-tagging content
+- Revoking roles or permissions
+- Removing devices from an active set
+- Bulk un-tagging content
 
 ```typescript
+// single member
 await redis.srem("user:123:roles", "admin");
+
+// multiple members
+const removed = await redis.srem("user:123:roles", "admin", "editor");
+console.log(`${removed} roles revoked`);
 ```
 
 ---
@@ -645,9 +696,8 @@ Get all members of a Redis Set.
 - Retrieving all active sessions for a user
 
 ```typescript
-const roles = await redis.smembers("user:123:roles"); // ["editor"]
+const roles = await redis.smembers("user:123:roles"); // ["editor", "viewer"]
 
-// authorization check
 if (roles.includes("admin")) {
   // allow admin action
 }
@@ -786,16 +836,17 @@ const count = await redis.eval(rateLimitScript, [`ratelimit:${userId}`], ["60"])
 
 #### Accessing the raw ioredis client
 
-If you need commands not exposed by `RedisCommandHandler`, you can still access the underlying ioredis instance directly:
+If you need commands not exposed by `RedisCommandHandler` (e.g. `HSET`, `LPUSH`, `PUBLISH`, `SUBSCRIBE`), access the underlying ioredis instance directly:
 
 ```typescript
 // single
 const raw = redis.redisConnection!;
 await raw.hset("hash:key", "field", "value");
+await raw.lpush("list:key", "item1", "item2");
 
 // pool (gets the next healthy connection via round-robin)
 const raw = pool.redisConnection!;
-await raw.lpush("list:key", "item");
+await raw.rpop("queue:jobs");
 
 // cluster
 const raw = cluster.clusterConnection!;
